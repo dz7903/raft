@@ -1354,10 +1354,10 @@ func stepLeader(r *raft, m pb.Message) error {
 
 		// Postpone read only request when this leader has not committed
 		// any log entry at its term.
-		if !r.committedEntryInCurrentTerm() {
-			r.pendingReadIndexMessages = append(r.pendingReadIndexMessages, m)
-			return nil
-		}
+		// if !r.committedEntryInCurrentTerm() {
+		// 	r.pendingReadIndexMessages = append(r.pendingReadIndexMessages, m)
+		// 	return nil
+		// }
 
 		sendMsgReadIndexResponse(r, m)
 
