@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	pb "go.etcd.io/raft/v3/raftpb"
+	"go.etcd.io/raft/v3/tracker"
 )
 
 type set[T comparable] map[T]struct{}
@@ -170,13 +171,14 @@ type EllsbergState struct {
 	logger       Logger
 }
 
-func EllsbergInit(id uint64, logger Logger) EllsbergState {
+func ellsbergInit(id uint64, logger Logger) EllsbergState {
 	// TODO: should we use buffered channels?
 	incomingMsgC := make(chan *pb.Message)
 	outgoingMsgC := make(chan *pb.Message)
 	instances := make(set[*simState])
 	instances.add(&simState{state: raftInit()})
 	return EllsbergState{
+		id:           id,
 		instances:    instances,
 		incomingMsgC: incomingMsgC,
 		outgoingMsgC: outgoingMsgC,
@@ -184,7 +186,7 @@ func EllsbergInit(id uint64, logger Logger) EllsbergState {
 	}
 }
 
-func (s *EllsbergState) MainLoop() {
+func (s *EllsbergState) mainLoop() {
 	for {
 		var m *pb.Message
 		select {
@@ -194,16 +196,6 @@ func (s *EllsbergState) MainLoop() {
 			s.processOutgoing(m)
 		}
 	}
-}
-
-func (s *EllsbergState) ReceiveMessage(m *pb.Message) {
-	s.logger.Infof("%d ellsberg: incoming msg %+v", s.id, m)
-	s.incomingMsgC <- m
-}
-
-func (s *EllsbergState) SendMessage(m *pb.Message) {
-	s.logger.Infof("%d ellsberg: outgoing msg %+v", s.id, m)
-	s.outgoingMsgC <- m
 }
 
 func (s *EllsbergState) processIncoming(m *pb.Message) {
@@ -227,4 +219,50 @@ func (s *EllsbergState) processOutgoing(m *pb.Message) {
 		s.logger.Fatalf("%d ellsberg: violation detected; no state in %+v can produce msg %+v", s.id, s.instances, m)
 	}
 	s.instances = newInstances
+}
+
+type MyTraceLogger struct {
+	ellsbergState *EllsbergState
+}
+
+func (l *MyTraceLogger) getEllsbergState() *EllsbergState {
+	return l.ellsbergState
+}
+
+type TraceLogger interface {
+	getEllsbergState() *EllsbergState
+}
+
+func traceInitState(r *raft) {
+	if r.traceLogger == nil {
+		s := ellsbergInit(r.id, r.logger)
+		r.traceLogger = &MyTraceLogger{ellsbergState: &s}
+	}
+	go r.traceLogger.getEllsbergState().mainLoop()
+}
+
+func traceReady(*raft) {}
+
+func traceCommit(*raft) {}
+
+func traceReplicate(*raft, ...pb.Entry) {}
+
+func traceBecomeFollower(*raft) {}
+
+func traceBecomeCandidate(*raft) {}
+
+func traceBecomeLeader(*raft) {}
+
+func traceChangeConfEvent(pb.ConfChangeI, *raft) {}
+
+func traceConfChangeEvent(tracker.Config, *raft) {}
+
+func traceSendMessage(r *raft, m *pb.Message) {
+	r.logger.Infof("%d ellsberg: sending msg %+v", r.id, m)
+	r.traceLogger.getEllsbergState().outgoingMsgC <- m
+}
+
+func traceReceiveMessage(r *raft, m *pb.Message) {
+	r.logger.Infof("%d ellsberg: receiving msg %+v", r.id, m)
+	r.traceLogger.getEllsbergState().incomingMsgC <- m
 }

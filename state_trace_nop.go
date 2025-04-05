@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !with_tla
+//go:build !with_tla && !with_ellsberg
 
 package raft
 

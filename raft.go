@@ -432,8 +432,6 @@ type raft struct {
 	pendingReadIndexMessages []pb.Message
 
 	traceLogger TraceLogger
-
-	ellsbergState *EllsbergState
 }
 
 func newRaft(c *Config) *raft {
@@ -445,8 +443,6 @@ func newRaft(c *Config) *raft {
 	if err != nil {
 		panic(err) // TODO(bdarnell)
 	}
-
-	ellsbergState := EllsbergInit(c.ID, c.Logger)
 
 	r := &raft{
 		id:                          c.ID,
@@ -466,7 +462,6 @@ func newRaft(c *Config) *raft {
 		disableConfChangeValidation: c.DisableConfChangeValidation,
 		stepDownOnRemoval:           c.StepDownOnRemoval,
 		traceLogger:                 c.TraceLogger,
-		ellsbergState:               &ellsbergState,
 	}
 
 	traceInitState(r)
@@ -497,8 +492,6 @@ func newRaft(c *Config) *raft {
 	// TODO(pav-kv): it should be ok to simply print %+v for lastID.
 	r.logger.Infof("newRaft %x [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
 		r.id, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, lastID.index, lastID.term)
-
-	go ellsbergState.MainLoop()
 
 	return r
 }
@@ -597,14 +590,12 @@ func (r *raft) send(m pb.Message) {
 		// above.
 		r.msgsAfterAppend = append(r.msgsAfterAppend, m)
 		traceSendMessage(r, &m)
-		r.ellsbergState.SendMessage(&m)
 	} else {
 		if m.To == r.id {
 			r.logger.Panicf("message should not be self-addressed when sending %s", m.Type)
 		}
 		r.msgs = append(r.msgs, m)
 		traceSendMessage(r, &m)
-		r.ellsbergState.SendMessage(&m)
 	}
 }
 
@@ -1094,7 +1085,6 @@ func (r *raft) poll(id uint64, t pb.MessageType, v bool) (granted int, rejected 
 
 func (r *raft) Step(m pb.Message) error {
 	traceReceiveMessage(r, &m)
-	r.ellsbergState.ReceiveMessage(&m)
 
 	// Handle the message term, which may result in our stepping down to a follower.
 	switch {
