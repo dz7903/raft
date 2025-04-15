@@ -222,11 +222,11 @@ func (s *EllsbergState) processOutgoing(m *pb.Message) {
 }
 
 type MyTraceLogger struct {
-	ellsbergState *EllsbergState
+	ellsbergState EllsbergState
 }
 
 func (l *MyTraceLogger) getEllsbergState() *EllsbergState {
-	return l.ellsbergState
+	return &l.ellsbergState
 }
 
 type TraceLogger interface {
@@ -236,10 +236,12 @@ type TraceLogger interface {
 func traceInitState(r *raft) {
 	if r.traceLogger == nil {
 		s := ellsbergInit(r.id, r.logger)
-		r.traceLogger = &MyTraceLogger{ellsbergState: &s}
+		r.traceLogger = &MyTraceLogger{ellsbergState: s}
 	}
 	go r.traceLogger.getEllsbergState().mainLoop()
 }
+
+func traceRecoverState(*raft) {}
 
 func traceReady(*raft) {}
 
@@ -256,6 +258,8 @@ func traceBecomeLeader(*raft) {}
 func traceChangeConfEvent(pb.ConfChangeI, *raft) {}
 
 func traceConfChangeEvent(tracker.Config, *raft) {}
+
+func traceBootstrap(*raft, ...pb.Entry) {}
 
 func traceSendMessage(r *raft, m *pb.Message) {
 	r.logger.Infof("%d ellsberg: sending msg %+v", r.id, m)
