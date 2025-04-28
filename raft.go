@@ -478,6 +478,7 @@ func newRaft(c *Config) *raft {
 
 	if !IsEmptyHardState(hs) {
 		r.loadState(hs)
+		traceRecoverState(r)
 	}
 	if c.Applied > 0 {
 		raftlog.appliedTo(c.Applied, 0 /* size */)
