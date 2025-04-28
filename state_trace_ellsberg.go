@@ -49,6 +49,12 @@ func (q queue[T]) empty() bool {
 }
 
 type raftState struct {
+	const str RequestVoteRequest = "RequestVoteRequest"
+	const str RequestVoteResponse = "RequestVoteResponse"
+	const str AppendEntriesRequest = "AppendEntriesRequest"
+	const str AppendEntriesResponse = "AppendEntriesResponse"
+	value := make(map[uint64][])
+
 }
 
 func raftInit() raftState {
