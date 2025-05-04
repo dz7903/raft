@@ -478,6 +478,7 @@ func newRaft(c *Config) *raft {
 
 	if !IsEmptyHardState(hs) {
 		r.loadState(hs)
+		traceRecoverState(r)
 	}
 	if c.Applied > 0 {
 		raftlog.appliedTo(c.Applied, 0 /* size */)
@@ -492,6 +493,7 @@ func newRaft(c *Config) *raft {
 	// TODO(pav-kv): it should be ok to simply print %+v for lastID.
 	r.logger.Infof("newRaft %x [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
 		r.id, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, lastID.index, lastID.term)
+
 	return r
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !with_tla
+//go:build !with_tla && !with_ellsberg && !with_faithful_validator
 
 package raft
 
@@ -29,6 +29,8 @@ type TracingEvent struct{}
 
 func traceInitState(*raft) {}
 
+func traceRecoverState(*raft) {}
+
 func traceReady(*raft) {}
 
 func traceCommit(*raft) {}
@@ -42,6 +44,8 @@ func traceBecomeCandidate(*raft) {}
 func traceBecomeLeader(*raft) {}
 
 func traceChangeConfEvent(raftpb.ConfChangeI, *raft) {}
+
+func traceBootstrap(*raft, ...raftpb.Entry) {}
 
 func traceConfChangeEvent(tracker.Config, *raft) {}
 

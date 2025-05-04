@@ -206,6 +206,8 @@ func traceInitState(r *raft) {
 	traceNodeEvent(rsmInitState, r)
 }
 
+func traceRecoverState(*raft) {}
+
 func traceReady(r *raft) {
 	traceNodeEvent(rsmReady, r)
 }
@@ -283,6 +285,8 @@ func traceConfChangeEvent(cfg tracker.Config, r *raft) {
 	p["cc"] = cc
 	traceEvent(rsmApplyConfChange, r, nil, p)
 }
+
+func traceBootstrap(*raft, ...raftpb.Entry) {}
 
 func traceSendMessage(r *raft, m *raftpb.Message) {
 	if r.traceLogger == nil {
