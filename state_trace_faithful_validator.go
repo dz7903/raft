@@ -109,6 +109,9 @@ func (v *Validator) sendAppendEntries(m *pb.Message, isHeartbeat bool) {
 	} else {
 		v.assertf(m.Commit == min(v.commitIndex, m.Index+uint64(len(m.Entries))), "AppendEntries mismatch: commitIndex=%d log={%+v} message={%+v}", v.commitIndex, v.log, m)
 	}
+	if m.Context != nil {
+		v.assertf(v.log[v.commitIndex].Term >= v.term, "readIndex violation: can not attach readIndex when a leader haven't commit an entry in its own term (commitIndex=%d, commitTerm=%d, currentTerm=%d)", v.commitIndex, v.log[v.commitIndex].Term, v.term)
+	}
 }
 
 func (v *Validator) sendAppendEntriesResp(m *pb.Message, isHeartbeat bool) {
@@ -455,7 +458,8 @@ func traceSendMessage(r *raft, m *pb.Message) {
 	var event raftEvent
 	switch m.Type {
 	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
-		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp:
+		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
+		pb.MsgReadIndex, pb.MsgReadIndexResp:
 		// ignore these messages
 		return
 	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
@@ -471,7 +475,8 @@ func traceReceiveMessage(r *raft, m *pb.Message) {
 	var event raftEvent
 	switch m.Type {
 	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
-		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp:
+		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
+		pb.MsgReadIndex, pb.MsgReadIndexResp:
 		// ignore these messages
 		return
 	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
