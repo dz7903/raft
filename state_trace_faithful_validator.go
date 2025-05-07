@@ -111,7 +111,7 @@ func (v *Validator) sendAppendEntries(m *pb.Message, isHeartbeat bool) {
 		v.assertf(m.Commit == min(v.commitIndex, m.Index+uint64(len(m.Entries))), "send AppendEntries mismatch: commitIndex=%d log={%+v} message={%+v}", v.commitIndex, v.log, m)
 	}
 	if m.Context != nil {
-		v.assertf(v.log[v.commitIndex].Term >= v.term, "readIndex violation: can not attach readIndex when a leader haven't commit an entry in its own term (commitIndex=%d, commitTerm=%d, currentTerm=%d)", v.commitIndex, v.log[v.commitIndex].Term, v.term)
+		v.assertf(v.log[v.commitIndex-1].Term >= v.term, "readIndex violation: can not attach readIndex when a leader haven't commit an entry in its own term (commitIndex=%d, commitTerm=%d, currentTerm=%d)", v.commitIndex, v.log[v.commitIndex-1].Term, v.term)
 	}
 }
 
@@ -440,14 +440,15 @@ func traceRecoverState(r *raft) {
 	r.logger.Infof("%d event recover state", r.id)
 	r.logger.Infof("%d actual log={%+v}", r.id, r.raftLog.allEntries())
 	// make "fake" entries for compacted
-	entries := append(make([]pb.Entry, r.raftLog.firstIndex()), r.raftLog.allEntries()...)
-	for i, _ := range entries {
-		entries[i].Index = uint64(i)
-		term, err := r.raftLog.term(uint64(i))
+	entries := make([]pb.Entry, r.raftLog.firstIndex()-1)
+	for i := range entries {
+		entries[i].Index = uint64(i) + 1
+		term, err := r.raftLog.term(uint64(i) + 1)
 		if err == nil {
 			entries[i].Term = term
 		}
 	}
+	entries = append(entries, r.raftLog.allEntries()...)
 	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventRecover, term: r.Term, vote: r.Vote, commit: r.raftLog.committed, entries: entries}
 }
 
