@@ -49,13 +49,15 @@ go install -v ./tools/benchmark
 Fifth, run the `etcd` local cluster:
 
 ```bash
-rm -r infra*.etcd # make sure the faithful validator/ellsberg starts from initial state
-goreman -f Procfile start # you may want to add `--log-level=error` in `Procfile` to suppress the debugging messages
+# make sure starts from the initial state
+rm -r infra*.etcd
+# you may need to add `--log-level=error` and `--snapshot-count=0` into `Profile`
+# to suppress debugging messages and snapshots
+goreman -f Procfile start
 ```
 
 Finally, run the benchmark tool:
 
 ```bash
-benchmark --endpoints=localhost:2379,localhost:22379,localhost:32379 --conns=10 --clients=100 \
-    put --key-size=8 --sequential-keys --total=5000 --val-size=256
+benchmark --endpoints=localhost:2379,localhost:22379,localhost:32379 --conns=10 --clients=10 put --total=1000
 ```
