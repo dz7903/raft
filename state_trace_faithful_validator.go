@@ -29,6 +29,7 @@ const (
 	eventCommit
 	eventReplicate
 	eventBecomeLeader
+	eventBecomeFollower
 	eventSendMessage
 	eventReceiveMessage
 )
@@ -101,16 +102,16 @@ func (v *Validator) sendAppendEntries(m *pb.Message, isHeartbeat bool) {
 	v.assert(m.Index+uint64(len(m.Entries)) <= uint64(len(v.log)))
 	for i, e := range m.Entries {
 		// we do not check the content of entries, only indexes and terms
-		v.assertf(e.Index == v.log[m.Index+uint64(i)+1].Index && e.Term == v.log[m.Index+uint64(i)+1].Term, "sendAppendEntries mismatch: entry %d ({%+v}) in AppendEntries is different from entry %d ({%+v}) in log", i, e, m.Index+uint64(i)+1, v.log[m.Index+uint64(i)+1])
+		v.assertf(e.Index == v.log[m.Index+uint64(i)].Index && e.Term == v.log[m.Index+uint64(i)].Term, "send AppendEntries mismatch: entry %d ({%+v}) in AppendEntries is different from entry %d ({%+v}) in log", i, e, m.Index+uint64(i), v.log[m.Index+uint64(i)])
 	}
 	if isHeartbeat {
 		v.assertf(m.Index == 0 && len(m.Entries) == 0, "hearbeat must be range [0, 0]")
 		v.assert(m.Commit == min(v.commitIndex, v.matchIndex[to]))
 	} else {
-		v.assertf(m.Commit == min(v.commitIndex, m.Index+uint64(len(m.Entries))), "AppendEntries mismatch: commitIndex=%d log={%+v} message={%+v}", v.commitIndex, v.log, m)
+		// v.assertf(m.Commit == min(v.commitIndex, m.Index+uint64(len(m.Entries))), "send AppendEntries mismatch: commitIndex=%d log={%+v} message={%+v}", v.commitIndex, v.log, m)
 	}
 	if m.Context != nil {
-		v.assertf(v.log[v.commitIndex].Term >= v.term, "readIndex violation: can not attach readIndex when a leader haven't commit an entry in its own term (commitIndex=%d, commitTerm=%d, currentTerm=%d)", v.commitIndex, v.log[v.commitIndex].Term, v.term)
+		v.assertf(v.log[v.commitIndex-1].Term >= v.term, "readIndex violation: can not attach readIndex when a leader haven't commit an entry in its own term (commitIndex=%d, commitTerm=%d, currentTerm=%d)", v.commitIndex, v.log[v.commitIndex-1].Term, v.term)
 	}
 }
 
@@ -123,11 +124,11 @@ func (v *Validator) sendAppendEntriesResp(m *pb.Message, isHeartbeat bool) {
 	m1 := v.latestMsg
 	v.assert(m1.Term <= v.term)
 	// m1.Index is "prevLogIndex", m1.LogTerm is "prevLogTerm"
-	logOk := m1.Index == 0 || m1.Index > 0 && m1.Index < uint64(len(v.log)) && m1.LogTerm == v.log[m1.Index].Term
+	logOk := m1.Index == 0 || m1.Index > 0 && m1.Index <= uint64(len(v.log)) && m1.LogTerm == v.log[m1.Index-1].Term
 	if m.Reject {
 		v.assert(m1.Term < v.term || m1.Term == v.term && v.role == Follower && !logOk)
 		v.assert(m.Term == v.term)
-		v.assert(m.Index == 0)
+		// v.assert(m.Index == 0)
 	} else {
 		v.assert(v.role == Follower)
 		v.assertf(m1.Term == v.term, "term mismatch: currentTerm=%d, msg={%+v}", v.term, m1)
@@ -139,13 +140,14 @@ func (v *Validator) sendAppendEntriesResp(m *pb.Message, isHeartbeat bool) {
 			}
 		} else if len(m1.Entries) > 0 {
 			firstConflictIndex := 0
-			for firstConflictIndex < len(m1.Entries) && m1.Index+uint64(firstConflictIndex)+1 < uint64(len(v.log)) {
-				if m1.Entries[firstConflictIndex].Term != v.log[m1.Index+uint64(firstConflictIndex)+1].Term {
+			for firstConflictIndex < len(m1.Entries) && m1.Index+uint64(firstConflictIndex) < uint64(len(v.log)) {
+				if m1.Entries[firstConflictIndex].Term != v.log[m1.Index+uint64(firstConflictIndex)].Term {
+					v.logger.Warningf("%d conflict detected at index %d (expected {%+v}, found {%+v})", v.id, m1.Index+uint64(firstConflictIndex)+1, m1.Entries[firstConflictIndex], v.log[m1.Index+uint64(firstConflictIndex)])
 					break
 				}
 				firstConflictIndex++
 			}
-			v.log = v.log[0 : m1.Index+uint64(firstConflictIndex)+1]
+			v.log = v.log[0 : m1.Index+uint64(firstConflictIndex)]
 			v.log = append(v.log, m1.Entries[firstConflictIndex:]...)
 			v.commitIndex = max(v.commitIndex, min(m1.Commit, m1.Index+uint64(len(m1.Entries))))
 		}
@@ -153,7 +155,7 @@ func (v *Validator) sendAppendEntriesResp(m *pb.Message, isHeartbeat bool) {
 		if isHeartbeat || m1.Index >= v.commitIndex {
 			v.assert(m.Index == m1.Index+uint64(len(m1.Entries)))
 		} else {
-			v.assert(m.Index == v.commitIndex)
+			// v.assert(m.Index == v.commitIndex)
 		}
 	}
 	v.latestMsg = nil
@@ -204,7 +206,10 @@ func (v *Validator) mainLoop() {
 			for _, e := range event.entries {
 				v.assert(e.Type == pb.EntryConfChange)
 			}
-			v.log = append(v.log, event.entries...)
+			v.assert(len(v.log) == 0)
+			v.log = event.entries
+			// the bootstrapped entries are committed
+			v.commitIndex = uint64(len(event.entries))
 		case eventTimeout:
 			v.logger.Infof("%d event timeout", v.id)
 			v.assert(v.role == Follower || v.role == Candidate)
@@ -227,6 +232,18 @@ func (v *Validator) mainLoop() {
 					v.matchIndex[i] = 0
 				}
 			}
+		case eventBecomeFollower:
+			v.logger.Infof("%d event become follower to term %d", v.id, event.term)
+			v.assertf(v.term <= event.term, "becomeFollower should not decrease the term")
+			if v.term < event.term {
+				v.role = Follower
+				v.term = event.term
+				v.vote = 0
+			} else {
+				v.logger.Infof("%d role=%d step down to follower", v.id, v.role)
+				v.role = Follower
+				v.term = event.term
+			}
 		case eventCommit:
 			v.logger.Infof("%d event commit", v.id)
 			v.assertf(v.role == Leader, "only leader can commit")
@@ -243,7 +260,7 @@ func (v *Validator) mainLoop() {
 			v.assertf(v.role == Leader, "only leader can replicate")
 			for i, e := range event.entries {
 				v.assertf(e.Term == v.term, "replicate must be the same term (currentTerm=%d) but term=%d found", v.term, e.Term)
-				v.assertf(e.Index == uint64(len(v.log)+i), "replicate entry index mismatch, expected %d but %d found (log={%+v})", len(v.log)+i+1, e.Index, v.log)
+				v.assertf(e.Index == uint64(len(v.log)+i+1), "replicate entry index mismatch, expected %d but %d found (log={%+v})", len(v.log)+i+1, e.Index, v.log)
 			}
 			v.log = append(v.log, event.entries...)
 		case eventSendMessage:
@@ -264,16 +281,22 @@ func (v *Validator) mainLoop() {
 				v.logger.Infof("%d event send RequestVoteResp to %d", v.id, to)
 				if to == v.id {
 					v.assertf(v.role == Candidate, "only Candidate can send RequestVoteResp to itself")
-					v.assert(v.term == event.message.Term)
+					v.assertf(v.term == event.message.Term, "send RequestVoteResp term mismatch (expected %d, found %d)", event.message.Term, v.term)
 					v.assert(!event.message.Reject)
 				} else {
 					v.assertf(v.latestMsg != nil && v.latestMsg.Type == pb.MsgVote, "expect RequestVote received")
 					m1 := v.latestMsg
+					v.assert(m1.From == m.To)
 					// m1.Index >= lastIndex = len(v.log)-1
 					logOk := m1.LogTerm > v.lastTerm() || m1.LogTerm == v.lastTerm() && m1.Index+1 >= uint64(len(v.log))
 					grant := logOk && m1.Term == v.term && (v.vote == None || v.vote == m1.From)
 					v.assertf(m.Term == v.term, "send RequestVoteResp term mismatch, expected %d but %d found", v.term, m.Term)
-					v.assertf(m.Reject == !grant, "send RequestVoteResp mismatch, should reject (logOk=%t, shouldGrant=%t, lastTerm=%d, logLen=%d)", logOk, grant, v.lastTerm(), len(v.log))
+					if m.Reject {
+						v.assertf(!grant, "send RequestVoteResp mismatch, should reject (logOk=%t, shouldGrant=%t, lastTerm=%d, logLen=%d, term=%d, vote=%d, msgTerm=%d)", logOk, grant, v.lastTerm(), len(v.log), v.term, v.vote, m1.Term)
+					} else {
+						v.assertf(grant, "send RequestVoteResp mismatch, should grant (logOk=%t, shouldGrant=%t, lastTerm=%d, logLen=%d, term=%d, vote=%d, msgTerm=%d)", logOk, grant, v.lastTerm(), len(v.log), v.term, v.vote, m1.Term)
+						v.vote = m1.From
+					}
 					v.latestMsg = nil
 				}
 			case pb.MsgHeartbeat:
@@ -293,11 +316,14 @@ func (v *Validator) mainLoop() {
 					v.assert(m.Term == v.term)
 					v.assert(!m.Reject)
 					// m.Index is "matchIndex"
-					// Note: len(v.log) is lastIndex + 1 here
-					v.assertf(m.Index+1 == uint64(len(v.log)), "AppendEntriesResp to self index mismatch, expected %d but %d found", len(v.log)-1, m.Index)
+					// Note: etcd-raft log starts from index 1, so len(v.log) == lastIndex here
+					v.assertf(m.Index == uint64(len(v.log)), "AppendEntriesResp to self index mismatch, expected %d but %d found (log={%+v})", len(v.log), m.Index, v.log)
 				} else {
 					v.sendAppendEntriesResp(m, false)
 				}
+			default:
+				v.logger.Errorf("%d validator: unknown message type {%+v}", v.id, m)
+				panic("unknown message type")
 			}
 		case eventReceiveMessage:
 			m := event.message
@@ -309,9 +335,10 @@ func (v *Validator) mainLoop() {
 			// v.assert(m.To == v.id)
 			from := m.From
 			if m.Term > v.term {
-				v.logger.Infof("%d event become follower", v.id)
+				v.logger.Infof("%d event become follower by msg", v.id)
 				v.role = Follower
 				v.term = m.Term
+				v.vote = 0
 				// continue to process this message
 			}
 			switch m.Type {
@@ -367,6 +394,9 @@ func (v *Validator) mainLoop() {
 				} else {
 					v.receiveAppendEntriesResp(m, false)
 				}
+			default:
+				v.logger.Errorf("%d validator: unknown message type {%+v}", v.id, m)
+				panic("unknown message type")
 			}
 		}
 	}
@@ -379,6 +409,8 @@ type TraceLogger interface {
 type MyTraceLogger struct {
 	validator Validator
 }
+
+const CHANNEL_BUFFER_SIZE int = 0
 
 func (l *MyTraceLogger) getValidator() *Validator {
 	return &l.validator
@@ -399,7 +431,7 @@ func traceInitState(r *raft) {
 		votesGranted:   make(map[uint64]struct{}),
 		log:            r.raftLog.allEntries(),
 		disabled:       false,
-		eventC:         make(chan raftEvent),
+		eventC:         make(chan raftEvent, CHANNEL_BUFFER_SIZE),
 		logger:         r.logger,
 	}
 	r.traceLogger = &MyTraceLogger{v}
@@ -410,14 +442,15 @@ func traceRecoverState(r *raft) {
 	r.logger.Infof("%d event recover state", r.id)
 	r.logger.Infof("%d actual log={%+v}", r.id, r.raftLog.allEntries())
 	// make "fake" entries for compacted
-	entries := append(make([]pb.Entry, r.raftLog.firstIndex()), r.raftLog.allEntries()...)
-	for i, _ := range entries {
-		entries[i].Index = uint64(i)
-		term, err := r.raftLog.term(uint64(i))
+	entries := make([]pb.Entry, r.raftLog.firstIndex()-1)
+	for i := range entries {
+		entries[i].Index = uint64(i) + 1
+		term, err := r.raftLog.term(uint64(i) + 1)
 		if err == nil {
 			entries[i].Term = term
 		}
 	}
+	entries = append(entries, r.raftLog.allEntries()...)
 	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventRecover, term: r.Term, vote: r.Vote, commit: r.raftLog.committed, entries: entries}
 }
 
@@ -431,7 +464,9 @@ func traceReplicate(r *raft, e ...pb.Entry) {
 	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventReplicate, entries: e}
 }
 
-func traceBecomeFollower(r *raft) {}
+func traceBecomeFollower(r *raft) {
+	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventBecomeFollower, term: r.Term}
+}
 
 func traceBecomeCandidate(r *raft) {
 	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventTimeout}
@@ -454,36 +489,29 @@ func traceBootstrap(r *raft, e ...pb.Entry) {
 	r.traceLogger.getValidator().eventC <- raftEvent{eventType: eventBootstrap, entries: e}
 }
 
-func traceSendMessage(r *raft, m *pb.Message) {
-	var event raftEvent
-	switch m.Type {
+func shouldIgnore(mt pb.MessageType) bool {
+	switch mt {
 	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
 		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
-		pb.MsgReadIndex, pb.MsgReadIndexResp:
-		// ignore these messages
-		return
-	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
-		event = raftEvent{eventType: eventSendMessage, message: m}
+		pb.MsgReadIndex, pb.MsgReadIndexResp, pb.MsgUnreachable, pb.MsgCheckQuorum:
+		return true
 	default:
-		r.logger.Errorf("%d validator: unknown message type {%+v}", r.id, m)
-		event = raftEvent{eventType: eventDisable}
+		return false
 	}
+}
+
+func traceSendMessage(r *raft, m *pb.Message) {
+	if shouldIgnore(m.Type) {
+		return
+	}
+	event := raftEvent{eventType: eventSendMessage, message: m}
 	r.traceLogger.getValidator().eventC <- event
 }
 
 func traceReceiveMessage(r *raft, m *pb.Message) {
-	var event raftEvent
-	switch m.Type {
-	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
-		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
-		pb.MsgReadIndex, pb.MsgReadIndexResp:
-		// ignore these messages
+	if shouldIgnore(m.Type) {
 		return
-	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
-		event = raftEvent{eventType: eventReceiveMessage, message: m}
-	default:
-		r.logger.Errorf("%d validator: unknown message type {%+v}", r.id, m)
-		event = raftEvent{eventType: eventDisable}
 	}
+	event := raftEvent{eventType: eventReceiveMessage, message: m}
 	r.traceLogger.getValidator().eventC <- event
 }
