@@ -650,7 +650,8 @@ func traceBootstrap(r *raft, e ...pb.Entry) {
 func traceSendMessage(r *raft, m *pb.Message) {
 	switch m.Type {
 	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
-		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp:
+		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
+		pb.MsgReadIndex, pb.MsgReadIndexResp, pb.MsgUnreachable, pb.MsgCheckQuorum:
 		// ignore these messages
 		return
 	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
@@ -663,7 +664,8 @@ func traceSendMessage(r *raft, m *pb.Message) {
 func traceReceiveMessage(r *raft, m *pb.Message) {
 	switch m.Type {
 	case pb.MsgHup, pb.MsgBeat, pb.MsgProp, pb.MsgPreVote, pb.MsgPreVoteResp,
-		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp:
+		pb.MsgStorageAppend, pb.MsgStorageAppendResp, pb.MsgStorageApply, pb.MsgStorageApplyResp,
+		pb.MsgReadIndex, pb.MsgReadIndexResp, pb.MsgUnreachable, pb.MsgCheckQuorum:
 		// ignore these messages
 		return
 	case pb.MsgVote, pb.MsgVoteResp, pb.MsgHeartbeat, pb.MsgHeartbeatResp, pb.MsgApp, pb.MsgAppResp:
