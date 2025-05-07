@@ -410,6 +410,8 @@ type MyTraceLogger struct {
 	validator Validator
 }
 
+const CHANNEL_BUFFER_SIZE int = 0
+
 func (l *MyTraceLogger) getValidator() *Validator {
 	return &l.validator
 }
@@ -429,7 +431,7 @@ func traceInitState(r *raft) {
 		votesGranted:   make(map[uint64]struct{}),
 		log:            r.raftLog.allEntries(),
 		disabled:       false,
-		eventC:         make(chan raftEvent),
+		eventC:         make(chan raftEvent, CHANNEL_BUFFER_SIZE),
 		logger:         r.logger,
 	}
 	r.traceLogger = &MyTraceLogger{v}
